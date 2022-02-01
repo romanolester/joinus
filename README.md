@@ -65,3 +65,6 @@ A working/running solution is ideal. You will be sending us a link to a copy of 
 With regards to this exercise, we generally want to know your thought process surrounding the changes you've made. Did you understand the task well? What assumptions did you make? Why did you choose to use library XYZ? Are there better implementations of feature ABC? How did you find the exercise? Any issues with the code that you saw? What can we improve?
 
 After that, we'll be conducting a more standard background/culture fit/technical interview.
+
+# Changelog
+ - 100% of the changes are on the Backend API. Change description can be found [here](src/api/Fleet.Api/README.md).
