@@ -1,9 +1,18 @@
-﻿using Fleet.Vehicles.Models;
+﻿using CsvHelper;
+using Fleet.Common;
+using Fleet.Vehicles.Models;
 using Fleet.Vehicles.Repositories;
 using Fleet.Vehicles.Requests;
 using Fleet.Vehicles.Responses;
 using Fleet.Vehicles.ViewModels;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Transactions;
@@ -14,12 +23,19 @@ namespace Fleet.Vehicles.Services
     {
         private readonly IVehicleRepository _vehicleRepository;
         private readonly IVehicleLogItemRepository _vehicleLogItemRepository;
+        private readonly ILogger _logger;
+        private readonly FileUploadOptions _options;
 
-        public DefaultVehicleService(IVehicleRepository vehicleRepository,
-            IVehicleLogItemRepository vehicleLogItemRepository)
+        public DefaultVehicleService(
+            IVehicleRepository vehicleRepository,
+            IVehicleLogItemRepository vehicleLogItemRepository,
+            ILogger<DefaultVehicleService> logger,
+            IOptions<FileUploadOptions> options)
         {
             _vehicleRepository = vehicleRepository;
             _vehicleLogItemRepository = vehicleLogItemRepository;
+            _logger = logger;
+            _options = options.Value;
         }
 
         public async Task<GetVehiclesResponse> GetVehiclesAsync(GetVehiclesRequest request)
@@ -49,9 +65,52 @@ namespace Fleet.Vehicles.Services
 
         public async Task<UpdateVehicleLogsResponse> UpdateVehicleLogsAsync(UpdateVehicleLogsRequest request)
         {
+            await UpdateVehicleLogs(request.Updates);
+
+            var response = new UpdateVehicleLogsResponse();
+            return response;
+        }
+        
+        public async Task<UpdateVehicleLogsResponse> UpdateVehicleLogsFromCsvAsync(IFormFile file)
+        {
+            bool isAccepted = false;
+            if (file.Length > 0)
+            {
+                if (file.FileName == $"{_options.AcceptedFileName}.csv")
+                {
+                    var vehicleLogs = GetCsvRecordFromFile(file);
+
+                    if (vehicleLogs != null && vehicleLogs.Count > 0)
+                    {
+                        await UpdateVehicleLogs(VehicleLogFileToViewModel(vehicleLogs));
+                        isAccepted = true;
+                    }
+                }
+
+                var filePath = isAccepted ? _options.AcceptedFilePath : _options.RejectedFilePath;
+
+                // save uploaded file
+                using (var stream = File.Create($"{filePath}\\{file.FileName.Replace(".csv", "-" + DateTime.Now.ToString("yyyy-MM-ddTHHmmss") + ".csv")}"))
+                {
+                    await file.CopyToAsync(stream);
+                }
+            }
+
+            if (!isAccepted)
+            {
+                _logger.LogError($"{nameof(UpdateVehicleLogsFromCsvAsync)}: Invalid File ({file?.FileName})"); 
+                throw new ArgumentException("Invalid file");
+            }
+
+            var response = new UpdateVehicleLogsResponse();
+            return response;
+        }
+
+        private async Task UpdateVehicleLogs(IEnumerable<VehicleUpdateViewModel> updates)
+        {
             var vehicles = new Dictionary<int, Vehicle>();
 
-            foreach (var update in request.Updates)
+            foreach (var update in updates)
             {
                 Vehicle vehicle;
                 if (update.VehicleId.HasValue)
@@ -59,7 +118,15 @@ namespace Fleet.Vehicles.Services
                     if (!vehicles.ContainsKey(update.VehicleId.Value))
                     {
                         vehicle = await _vehicleRepository.GetAsync(update.VehicleId.Value);
-                        vehicles.Add(update.VehicleId.Value, vehicle);
+                        if (vehicle != null)
+                        {
+                            vehicles.Add(update.VehicleId.Value, vehicle);
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"{nameof(UpdateVehicleLogs)}: Record for {nameof(update.VehicleId)} does not exist.");
+                            continue;
+                        }
                     }
                     else
                     {
@@ -68,37 +135,39 @@ namespace Fleet.Vehicles.Services
                 }
                 else if (!string.IsNullOrEmpty(update.Name) && update.Type.HasValue)
                 {
-                    vehicle = new Vehicle
-                    {
-                        Name = update.Name,
-                        Type = update.Type.Value,
-                        Log = new List<VehicleLogItem>(),
-                        VehicleFleets = new List<VehicleFleet>()
-                    };
+                    vehicle = await _vehicleRepository.GetAsync(update.Name, update.Type.Value);
 
-                    await _vehicleRepository.CreateAsync(vehicle);
+                    if (vehicle == null)
+                    {
+                        vehicle = new Vehicle
+                        {
+                            Name = update.Name,
+                            Type = update.Type.Value,
+                            Log = new List<VehicleLogItem>(),
+                            VehicleFleets = new List<VehicleFleet>()
+                        };
+
+                        await _vehicleRepository.CreateAsync(vehicle);
+                    }
                 }
                 else
                 {
+                    _logger.LogWarning($"{nameof(UpdateVehicleLogs)}: Record doesn't have a valid Vehicle Identifier");
                     // No vehicle ID, and no name and type, so we just skip since we don't know what this is
                     continue;
                 }
 
-                var vehicleLogItem = new VehicleLogItem
+                if (vehicle != null && update.Location.Timestamp <= DateTime.Now)
                 {
-                    Vehicle = vehicle,
-                    Location = update.Location
-                };
-
-                await _vehicleLogItemRepository.CreateAsync(vehicleLogItem);
+                    var vehicleLogItem = new VehicleLogItem
+                    {
+                        Vehicle = vehicle,
+                        Location = update.Location
+                    };
+                    await _vehicleLogItemRepository.CreateAsync(vehicleLogItem);
+                    _logger.LogInformation($"{nameof(UpdateVehicleLogs)}: Added log for Vehicle ({vehicle.Name})");
+                }
             }
-
-            var response = new UpdateVehicleLogsResponse
-            {
-
-            };
-
-            return response;
         }
 
         private async Task<GetVehiclesResponse> GetVehiclesByFleetId(int? fleetId)
@@ -118,6 +187,42 @@ namespace Fleet.Vehicles.Services
             };
 
             return response;
+        }
+
+        private List<VehicleLogFile> GetCsvRecordFromFile(IFormFile file)
+        {
+            List<VehicleLogFile> vehicleLogs;
+            using (var textReader = new StreamReader(file.OpenReadStream()))
+            using (var csv = new CsvReader(textReader, CultureInfo.InvariantCulture))
+            {
+                vehicleLogs = csv.GetRecords<VehicleLogFile>().ToList();
+            }
+
+            return vehicleLogs;
+        }
+
+        private List<VehicleUpdateViewModel> VehicleLogFileToViewModel(List<VehicleLogFile> logFiles)
+        {
+            var vehicleUpdateViewModels = new List<VehicleUpdateViewModel>();
+
+            logFiles.ForEach(logFile =>
+            {
+                vehicleUpdateViewModels.Add(
+                    new VehicleUpdateViewModel
+                    {
+                        Name = logFile.Name,
+                        VehicleId = logFile.VehicleId,
+                        Type = logFile.Type,
+                        Location = new Location
+                        {
+                            Latitude = logFile.Latitude,
+                            Longitude = logFile.Longitude,
+                            Timestamp = logFile.Timestamp,
+                        }
+                    });
+            });
+
+            return vehicleUpdateViewModels;
         }
     }
 }

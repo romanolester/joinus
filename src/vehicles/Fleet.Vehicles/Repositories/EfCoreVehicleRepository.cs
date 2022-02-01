@@ -30,6 +30,13 @@ namespace Fleet.Vehicles.Repositories
                 .FirstOrDefaultAsync();
         }
 
+        public async Task<Vehicle> GetAsync(string name, VehicleType type)
+        {
+            return await _database.Vehicles
+                .Where(v => v.Name == name && v.Type == type)
+                .FirstOrDefaultAsync();
+        }
+
         public async Task<IEnumerable<Vehicle>> GetAsync()
         {
             return await _database.Vehicles
@@ -47,5 +54,6 @@ namespace Fleet.Vehicles.Repositories
                 .Include(v => v.Log.OrderBy(l => l.Location.Timestamp))
                 .ToListAsync();
         }
+
     }
 }

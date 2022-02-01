@@ -17,3 +17,19 @@ For the backend part of the exercise, you are to add a few endpoints to support 
 You may choose to implement this however you like: use any NuGet packages, rewrite the project in your framework of choice, restructure the solution, split it into microservices, change the database provider, combine it into a single project, or whatever your imagination can produce.
 
 You may choose to focus 100% of your energy on the backend, in which case, please provide sample Postman requests. You may go above and beyond the basic requirements to demonstrate in-depth technical knowledge and product design chops.
+
+# Changelog
+- Added Logging, HttpLogging for both the request and response and Error logging
+- Added Exception Handling, properly handle the exceptions and make sure not to return it to the client application.
+- Added a new endpoint named ("api/vehicles/logs/csv") for end of day upload of vehicle locations. This endpoint uses the same business logic with ("api/vehicles/logs") both of them have the ability to create new vehicle record and update vehicle logs.
+- Added configurations:
+  - FileUpload.AcceptedFileName, accepted filename for end of day upload
+  - FileUpload.AcceptedFilePath, file path to store accepted end of day files
+  - FileUpload.RejectedFilePath, file path to store rejected end of day files
+
+# How to run and test the app
+
+1. Run `dotnet run` or `dotnet watch run` on the project.
+2. Import the [Postman collection](../../tools/postman_collection/joinus.postman_collection.json) to a Postman application (preferably version 2.1).
+3. Open 'Upload CSV EOD' request and go to Body tab. Change value for the file and select the proper file. You can use the [sample file](../../tools/sample_csv/vehicle_eod.csv) and update the values accordingly.
+4. Execute 'Upload CSV EOD' request to test.

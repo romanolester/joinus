@@ -10,10 +10,19 @@ namespace Fleet.Api.Controllers
     public class FleetsController : Controller
     {
         private readonly IFleetService _fleetService;
+        private readonly ILogger _logger;
 
-        public FleetsController(IFleetService fleetService)
+        /// <summary>
+        /// Api Controller for Fleets 
+        /// </summary>
+        /// <param name="fleetService"></param>
+        /// <param name="logger"></param>
+        public FleetsController(
+            IFleetService fleetService,
+            ILogger<FleetsController> logger)
         {
             _fleetService = fleetService;
+            _logger = logger;
         }
 
         /// <summary>
@@ -23,6 +32,20 @@ namespace Fleet.Api.Controllers
         /// <returns>A list of fleets</returns>
         [HttpGet]
         [Route("")]
-        public Task<GetFleetsResponse> GetFleetsAsync([FromQuery] GetFleetsRequest request) => _fleetService.GetFleetsAsync(request);
+        public async Task<IActionResult> GetFleetsAsync([FromQuery] GetFleetsRequest request)
+        {
+            GetFleetsResponse response;
+            try
+            {
+                response = await _fleetService.GetFleetsAsync(request);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e.ToString());
+                return StatusCode(500);
+            }
+
+            return Ok(response);
+        }
     }
 }
